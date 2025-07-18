@@ -1,0 +1,1 @@
+/usr/bin/c++  -Wall -Wextra -O2 CMakeFiles/echo_server.dir/src/buffer.cpp.o CMakeFiles/echo_server.dir/src/connection.cpp.o CMakeFiles/echo_server.dir/src/echo_server.cpp.o CMakeFiles/echo_server.dir/src/event_loop.cpp.o CMakeFiles/echo_server.dir/src/logger.cpp.o CMakeFiles/echo_server.dir/src/main.cpp.o CMakeFiles/echo_server.dir/src/socket.cpp.o -o bin/echo_server 
