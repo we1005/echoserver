@@ -69,75 +69,134 @@
 
 ### 2.2 UML类图设计
 
-```
-┌─────────────────┐
-│   EchoServer    │
-├─────────────────┤
-│ - eventLoop     │
-│ - listenSocket  │
-│ - logger        │
-├─────────────────┤
-│ + start()       │
-│ + stop()        │
-│ + handleNewConn()│
-└─────────────────┘
-         │
-         │ 包含
-         ▼
-┌─────────────────┐
-│   EventLoop     │
-├─────────────────┤
-│ - epollFd       │
-│ - connections   │
-│ - isRunning     │
-├─────────────────┤
-│ + loop()        │
-│ + addConn()     │
-│ + removeConn()  │
-└─────────────────┘
-         │
-         │ 管理
-         ▼
-┌─────────────────┐
-│   Connection    │
-├─────────────────┤
-│ - socket        │
-│ - inputBuffer   │
-│ - outputBuffer  │
-├─────────────────┤
-│ + handleRead()  │
-│ + handleWrite() │
-│ + send()        │
-└─────────────────┘
-         │
-         │ 包含
-         ▼
-┌─────────────────┐    ┌─────────────────┐
-│     Socket      │    │     Buffer      │
-├─────────────────┤    ├─────────────────┤
-│ - sockfd        │    │ - data          │
-│ - addr          │    │ - readIndex     │
-├─────────────────┤    │ - writeIndex    │
-│ + create()      │    ├─────────────────┤
-│ + bind()        │    │ + append()      │
-│ + listen()      │    │ + retrieve()    │
-│ + accept()      │    │ + peek()        │
-│ + read()        │    │ + size()        │
-│ + write()       │    └─────────────────┘
-└─────────────────┘
-
-┌─────────────────┐
-│     Logger      │
-├─────────────────┤
-│ - level         │
-│ - output        │
-├─────────────────┤
-│ + log()         │
-│ + debug()       │
-│ + info()        │
-│ + warn()        │
-│ + error()       │
-└─────────────────┘
+```mermaid
+classDiagram
+    class EchoServer {
+        -int port_
+        -Socket listenSocket_
+        -EventLoop eventLoop_
+        -Logger& logger_
+        +EchoServer(int port)
+        +~EchoServer()
+        +void start()
+        +void stop()
+        -void handleNewConnection()
+    }
+    
+    class EventLoop {
+        -int epollfd_
+        -vector~epoll_event~ events_
+        -unordered_map~int, shared_ptr~Connection~~ connections_
+        -bool quit_
+        +EventLoop()
+        +~EventLoop()
+        +void loop()
+        +void quit()
+        +void addConnection(shared_ptr~Connection~ conn)
+        +void removeConnection(int fd)
+        -void handleEvents(int numEvents)
+    }
+    
+    class Connection {
+        -Socket socket_
+        -Buffer inputBuffer_
+        -Buffer outputBuffer_
+        -ConnectionState state_
+        -sockaddr_in peerAddr_
+        +Connection(int sockfd, const sockaddr_in& addr)
+        +void handleRead()
+        +void handleWrite()
+        +void handleError()
+        +void send(const string& message)
+        +void shutdown()
+        +bool isConnected() const
+        +int fd() const
+        -void handleClose()
+    }
+    
+    class Socket {
+        -int sockfd_
+        +Socket(int sockfd)
+        +~Socket()
+        +Socket(Socket&& other) noexcept
+        +Socket& operator=(Socket&& other) noexcept
+        +void bind(const sockaddr_in& addr)
+        +void listen()
+        +int accept(sockaddr_in* addr)
+        +ssize_t read(void* buf, size_t count)
+        +ssize_t write(const void* buf, size_t count)
+        +void setNonBlocking()
+        +void setReuseAddr()
+        +int fd() const
+    }
+    
+    class Buffer {
+        -vector~char~ buffer_
+        -size_t readerIndex_
+        -size_t writerIndex_
+        +Buffer(size_t initialSize)
+        +size_t readableBytes() const
+        +size_t writableBytes() const
+        +size_t prependableBytes() const
+        +void append(const char* data, size_t len)
+        +void append(const string& str)
+        +string retrieve(size_t len)
+        +string retrieveAll()
+        +const char* peek() const
+        -void makeSpace(size_t len)
+    }
+    
+    class Logger {
+        -LogLevel currentLevel_
+        -mutex mutex_
+        +Logger& getInstance()$ 
+        +void setLevel(LogLevel level)
+        +void log(LogLevel level, const string& message)
+        +void debug(const string& message)
+        +void info(const string& message)
+        +void warn(const string& message)
+        +void error(const string& message)
+        -Logger()
+        -string getCurrentTime()
+        -string levelToString(LogLevel level)
+    }
+    
+    class ConnectionState {
+        <<enumeration>>
+        kConnecting
+        kConnected
+        kDisconnecting
+        kDisconnected
+    }
+    
+    class LogLevel {
+        <<enumeration>>
+        DEBUG
+        INFO
+        WARN
+        ERROR
+    }
+    
+    %% 关系定义
+    EchoServer *-- EventLoop : 组合
+    EchoServer *-- Socket : 组合
+    EchoServer ..> Logger : 依赖
+    
+    EventLoop o-- Connection : 聚合
+    
+    Connection *-- Socket : 组合
+    Connection *-- Buffer : 组合(2个)
+    Connection ..> ConnectionState : 依赖
+    
+    Logger ..> LogLevel : 依赖
+    
+    %% 注释
+    note for EchoServer "服务器主类\n协调各个组件\n处理新连接"
+    note for EventLoop "事件循环核心\n使用epoll管理连接\n事件驱动主循环"
+    note for Connection "表示客户端连接\n管理连接状态\n处理I/O事件"
+    note for Socket "封装socket系统调用\nRAII管理文件描述符\n异常安全"
+    note for Buffer "动态缓冲区\n高效读写操作\n自动扩容"
+    note for Logger "单例模式\n线程安全日志\n多级别输出"
 ```
 
 ### 2.3 类职责分析
