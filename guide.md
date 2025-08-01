@@ -670,6 +670,290 @@ std::shared_ptr<Connection> conn = std::make_shared<Connection>(sockfd, addr);
 2. 优化缓冲区大小
 3. 使用更高效的数据结构
 
+## 📊 详细类设计图
+
+为了更好地理解每个类的内部结构，以下是各个核心类的详细UML图：
+
+### Logger类详细设计
+
+```mermaid
+classDiagram
+    class Logger {
+        <<singleton>>
+        -LogLevel currentLevel_
+        -mutex mutex_
+        -Logger()
+        +getInstance()$ Logger&
+        +setLevel(LogLevel level) void
+        +log(LogLevel level, const string& message) void
+        +debug(const string& message) void
+        +info(const string& message) void
+        +warn(const string& message) void
+        +error(const string& message) void
+        -getCurrentTime() string
+        -levelToString(LogLevel level) string
+    }
+    
+    class LogLevel {
+        <<enumeration>>
+        DEBUG
+        INFO
+        WARN
+        ERROR
+    }
+    
+    Logger ..> LogLevel : uses
+```
+
+### Buffer类详细设计
+
+```mermaid
+classDiagram
+    class Buffer {
+        -vector~char~ buffer_
+        -size_t readerIndex_
+        -size_t writerIndex_
+        +Buffer(size_t initialSize = kInitialSize)
+        +readableBytes() const size_t
+        +writableBytes() const size_t
+        +prependableBytes() const size_t
+        +append(const char* data, size_t len) void
+        +append(const string& str) void
+        +retrieve(size_t len) string
+        +retrieveAll() string
+        +peek() const char*
+        +retrieveInt64() int64_t
+        +retrieveInt32() int32_t
+        +retrieveInt16() int16_t
+        +retrieveInt8() int8_t
+        +prependInt64(int64_t x) void
+        +prependInt32(int32_t x) void
+        +prependInt16(int16_t x) void
+        +prependInt8(int8_t x) void
+        -makeSpace(size_t len) void
+        -begin() char*
+        -begin() const char*
+    }
+    
+    note for Buffer "kCheapPrepend = 8\nkInitialSize = 1024"
+```
+
+### Socket类详细设计
+
+```mermaid
+classDiagram
+    class Socket {
+        -int sockfd_
+        +Socket(int sockfd)
+        +~Socket()
+        +Socket(Socket&& other) noexcept
+        +operator=(Socket&& other) noexcept Socket&
+        +bind(const sockaddr_in& addr) void
+        +listen(int backlog = SOMAXCONN) void
+        +accept(sockaddr_in* addr) int
+        +connect(const sockaddr_in& addr) void
+        +read(void* buf, size_t count) ssize_t
+        +write(const void* buf, size_t count) ssize_t
+        +close() void
+        +setNonBlocking() void
+        +setReuseAddr() void
+        +setReusePort() void
+        +setKeepAlive() void
+        +setTcpNoDelay() void
+        +fd() const int
+        +getLocalAddr() sockaddr_in
+        +getPeerAddr() sockaddr_in
+        +getSocketError() int
+        +isSelfConnect() bool
+        -Socket(const Socket&) = delete
+        -operator=(const Socket&) = delete
+    }
+    
+    note for Socket "RAII管理socket文件描述符\n禁止拷贝，支持移动语义\n异常安全保证"
+```
+
+### Connection类详细设计
+
+```mermaid
+classDiagram
+    class Connection {
+        -Socket socket_
+        -Buffer inputBuffer_
+        -Buffer outputBuffer_
+        -ConnectionState state_
+        -sockaddr_in peerAddr_
+        -string name_
+        -Timestamp lastReceiveTime_
+        +Connection(int sockfd, const sockaddr_in& addr)
+        +~Connection()
+        +handleRead() void
+        +handleWrite() void
+        +handleError() void
+        +handleClose() void
+        +send(const string& message) void
+        +send(const char* data, size_t len) void
+        +sendInLoop(const string& message) void
+        +shutdown() void
+        +forceClose() void
+        +setTcpNoDelay(bool on) void
+        +setKeepAlive(bool on) void
+        +isConnected() const bool
+        +isDisconnected() const bool
+        +fd() const int
+        +name() const string&
+        +peerAddress() const sockaddr_in&
+        +localAddress() const sockaddr_in
+        +setState(ConnectionState state) void
+        +getState() const ConnectionState
+        -sendInLoop(const char* data, size_t len) void
+        -Connection(const Connection&) = delete
+        -operator=(const Connection&) = delete
+    }
+    
+    class ConnectionState {
+        <<enumeration>>
+        kConnecting
+        kConnected
+        kDisconnecting
+        kDisconnected
+    }
+    
+    Connection *-- Socket : composition
+    Connection *-- Buffer : composition(2)
+    Connection ..> ConnectionState : uses
+    
+    note for Connection "管理单个客户端连接\n处理读写事件\n状态管理"
+```
+
+### EventLoop类详细设计
+
+```mermaid
+classDiagram
+    class EventLoop {
+        -int epollfd_
+        -vector~epoll_event~ events_
+        -unordered_map~int, shared_ptr~Connection~~ connections_
+        -bool quit_
+        -bool looping_
+        -thread::id threadId_
+        -mutex mutex_
+        -vector~function~void()~~ pendingFunctors_
+        -int wakeupFd_
+        -unique_ptr~Channel~ wakeupChannel_
+        +EventLoop()
+        +~EventLoop()
+        +loop() void
+        +quit() void
+        +runInLoop(function~void()~ cb) void
+        +queueInLoop(function~void()~ cb) void
+        +addConnection(shared_ptr~Connection~ conn) void
+        +removeConnection(int fd) void
+        +updateConnection(shared_ptr~Connection~ conn, int events) void
+        +isInLoopThread() const bool
+        +assertInLoopThread() void
+        +wakeup() void
+        -handleEvents(int numEvents) void
+        -doPendingFunctors() void
+        -handleWakeup() void
+        -abortNotInLoopThread() void
+        -EventLoop(const EventLoop&) = delete
+        -operator=(const EventLoop&) = delete
+    }
+    
+    EventLoop o-- Connection : aggregation
+    
+    note for EventLoop "事件循环核心\n使用epoll管理连接\n线程安全的任务队列"
+```
+
+### EchoServer类详细设计
+
+```mermaid
+classDiagram
+    class EchoServer {
+        -int port_
+        -Socket listenSocket_
+        -EventLoop eventLoop_
+        -Logger& logger_
+        -bool started_
+        -thread serverThread_
+        -atomic~bool~ running_
+        +EchoServer(int port)
+        +~EchoServer()
+        +start() void
+        +stop() void
+        +isRunning() const bool
+        +getPort() const int
+        +getConnectionCount() const size_t
+        -handleNewConnection() void
+        -onConnection(shared_ptr~Connection~ conn) void
+        -onMessage(shared_ptr~Connection~ conn, Buffer* buffer) void
+        -onWriteComplete(shared_ptr~Connection~ conn) void
+        -serverThreadFunc() void
+        -EchoServer(const EchoServer&) = delete
+        -operator=(const EchoServer&) = delete
+    }
+    
+    EchoServer *-- Socket : composition
+    EchoServer *-- EventLoop : composition
+    EchoServer ..> Logger : dependency
+    
+    note for EchoServer "服务器主类\n协调各个组件\n处理新连接和消息"
+```
+
+### 类之间的整体关系图
+
+```mermaid
+classDiagram
+    class EchoServer {
+        +start()
+        +stop()
+    }
+    
+    class EventLoop {
+        +loop()
+        +addConnection()
+    }
+    
+    class Connection {
+        +handleRead()
+        +handleWrite()
+    }
+    
+    class Socket {
+        +read()
+        +write()
+    }
+    
+    class Buffer {
+        +append()
+        +retrieve()
+    }
+    
+    class Logger {
+        +log()
+    }
+    
+    EchoServer *-- EventLoop : "1"
+    EchoServer *-- Socket : "1 (listen)"
+    EchoServer ..> Logger : "uses"
+    
+    EventLoop o-- Connection : "0..*"
+    
+    Connection *-- Socket : "1"
+    Connection *-- Buffer : "2 (in/out)"
+    Connection ..> Logger : "uses"
+    
+    Socket ..> Logger : "uses"
+    Buffer ..> Logger : "uses"
+    
+    note for EchoServer "主控制器"
+    note for EventLoop "事件分发器"
+    note for Connection "连接管理器"
+    note for Socket "网络接口"
+    note for Buffer "数据缓冲"
+    note for Logger "日志记录"
+```
+
 ## 📈 进阶学习建议
 
 ### 8.1 功能扩展
